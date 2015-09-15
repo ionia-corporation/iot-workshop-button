@@ -11,6 +11,20 @@ extern "C" {
   #include "user_interface.h"
 }
 
+/*************************** GPIO Setup **************************************/
+
+#define LED_PIN    13
+#define BUTTON_PIN 14
+
+enum {
+  ERR_OK                      = 0,
+  ERR_WIFI_CONNECT_FAILED     = 1,
+  ERR_MQTT_CONNECTION_FAILED  = 2,
+  ERR_MQTT_PUBLISH_FAILED     = 3,
+  ERR_MQTT_UNEXPECTED_DISC    = 4,
+  ERR_SERVER_ISSUE            = 5
+};
+
 /*************************** Wifi Setup **************************************/
 
 // Acces Point
@@ -62,28 +76,34 @@ uint32_t sendPayload=0;
 /* Go to http://192.168.4.1 in a web browser
  * connected to this access point to see it. */
 void setup() {
+  //Set up the GPIO
+  pinMode(LED_PIN, OUTPUT);
+  pinMode(BUTTON_PIN, INPUT);
   // TODO: test if this initial delay is necessary
   delay(5000);
   Serial.begin(115200);
   EEPROM.begin(4096);
 
+  //@TODO: This line is just a test. Remove it. Maybe use the Chip ID to uniquely identify the AP?
   Serial.println(ESP.getChipId());
 
   // test to see if we can connect with values from EEPROM
-  bool gotValidCredentials = 0;
+  bool gotValidCredentials = 1;
   Serial.println("trying to read WiFi creds from EEPROM");
-  gotValidCredentials  = read_eeprom_string(WIFI_SSID_ADDR, ssid, 100);
-  gotValidCredentials &= read_eeprom_string(WIFI_PASS_ADDR, pass, 100);
+  //gotValidCredentials  = read_eeprom_string(WIFI_SSID_ADDR, ssid, 100);
+  //gotValidCredentials &= read_eeprom_string(WIFI_PASS_ADDR, pass, 100);
+  EEPROM.get(WIFI_SSID_ADDR, ssid);
+  EEPROM.get(WIFI_PASS_ADDR, pass);
 
   /*
-  Serial.println("<OJETE>");
+  Serial.println("<Debugging>");
   for(int i=0; i<100; i++)
   {
     Serial.print(i);
     Serial.println(ssid[i]);
     if(ssid[i] == '\0') break;
   }
-  Serial.println("</OJETE>");
+  Serial.println("</Debugging>");
   */
 
   if(gotValidCredentials){
@@ -99,6 +119,7 @@ void setup() {
       sendPayload = 1;
     }else{
       Serial.println("connect failed :(");
+      play_led_sequence(ERR_WIFI_CONNECT_FAILED);
       setupAccessPoint();
     }
   } else {
@@ -109,6 +130,27 @@ void setup() {
 }
 
 void loop() {
+  //JC's
+  //@TODO: Check the API for "WiFi mode (client/AP/...) and check for that instead of WiFi.status()
+  if(WiFi.status() == WL_CONNECTED){ //If we're in client mode and connected to a WiFi...
+    MQTT_connect();
+    if(! testFeed.publish(sendPayload++)){
+      Serial.println("PUBLISH FAILED");
+    } else {
+      Serial.println("MQTT message successfully published");
+    }
+    // TODO: make this a deep sleep instead (note you will have to store and retrieve Wifi creds!!!!)
+    delay(5000);
+
+    //system_deep_sleep_set_option(0);
+    //system_deep_sleep(5000000);            // deep sleep for 5 seconds
+    ////ESP.deepsleep(5000, WAKE_RFCAL);
+  }else{ //If we're in AP mode or simply not connected
+    server.handleClient();
+  }
+
+  // Paul's original logic workflow
+  /*
   if(sendPayload > 0){
     MQTT_connect();
     if(! testFeed.publish(sendPayload++)){
@@ -117,22 +159,44 @@ void loop() {
       Serial.println("HOLY CRAP IT WORKED!");
     }
     // TODO: make this a deep sleep instead (note you will have to store and retrieve Wifi creds!!!!)
-    // TODO: make this a deep sleep instead (note you will have to store and retrieve Wifi creds!!!!)
-    // TODO: make this a deep sleep instead (note you will have to store and retrieve Wifi creds!!!!)
-    // TODO: make this a deep sleep instead (note you will have to store and retrieve Wifi creds!!!!)
     delay(5000);
-
     //system_deep_sleep_set_option(0);
     //system_deep_sleep(5000000);            // deep sleep for 5 seconds    
     ////ESP.deepsleep(5000, WAKE_RFCAL);
   }else{
     server.handleClient();
   }
+  */
 }
 
-boolean read_eeprom_string(int addr, char* buffer, int max_size){
+#define SLOW_BLINK_DELAY 300
+#define FAST_BLINK_DELAY 100
+
+inline void led_seq_for(uint32_t loops, uint32_t delay_len) {
+  for(int i=0; i<loops; i++) {
+    delay(delay_len);
+    digitalWrite(LED_PIN, HIGH);
+    delay(delay_len);
+    digitalWrite(LED_PIN, LOW);
+  }
+}
+
+void play_led_sequence(uint16_t status) {
+  switch(status)
+  {
+    case ERR_OK:                      led_seq_for(3, FAST_BLINK_DELAY);  break;
+    case ERR_WIFI_CONNECT_FAILED:     led_seq_for(5, SLOW_BLINK_DELAY);  break;
+    case ERR_MQTT_CONNECTION_FAILED:  led_seq_for(10, SLOW_BLINK_DELAY); break;
+    case ERR_MQTT_PUBLISH_FAILED:     led_seq_for(2, SLOW_BLINK_DELAY);  break;
+    case ERR_MQTT_UNEXPECTED_DISC:    led_seq_for(10, SLOW_BLINK_DELAY); break;
+    case ERR_SERVER_ISSUE:            led_seq_for(7, SLOW_BLINK_DELAY);  break;
+  }
+}
+
+bool read_eeprom_string(int addr, char* buffer, int max_size) {
   for(int i=0; i<max_size; i++){
-    EEPROM.get(addr+i, buffer[i]);
+    //EEPROM.get(addr+(i*sizeof(char)), buffer[i]);
+    buffer[i] = EEPROM.read(addr+i);
     if(buffer[i] == '\0'){
       Serial.println(i);
       return true;
@@ -144,6 +208,7 @@ boolean read_eeprom_string(int addr, char* buffer, int max_size){
 void setupAccessPoint() {
   Serial.println();
   Serial.print("Configuring access point...");
+  //@TODO: I believe the parameters in softAP are being ignored. My AP is called ESP_%c%c%c%c. Find out why.
   /* You can remove the password parameter if you want the AP to be open. */
   WiFi.softAP(ap_ssid, ap_pass);
 
@@ -156,15 +221,19 @@ void setupAccessPoint() {
 }
 
 bool tryWifiConnect(){
-  Serial.print("____________ Using the SSID: ");
-  Serial.println(ssid);
-  Serial.print("____________ Using the pass: ");
-  Serial.println(pass);
-  WiFi.begin(ssid, pass);
-  for(int y = 0; y < 10 && WiFi.status() != WL_CONNECTED; y++){
+  //WiFi.begin(ssid, pass);
+  //char s[100];
+  //char p[100];
+  //ssid.toCharArray(s, 100);
+  //pass.toCharArray(p, 100);
+  //WiFi.begin(s, p);
+  //WiFi.begin("SKYD6F7B", "CBECPTFA");
+  for(int y = 0; y < 6 && WiFi.status() != WL_CONNECTED; y++){
     delay(1500);
-    Serial.print(".");
+    Serial.print("\tFailed to connect. WiFi.status() is ");
+    Serial.println(WiFi.status());
   }
+  //@TODO: Is this WL_CONNECTED the reason why this function is returning false? See if there's a delay when setting WiFi.status or something. println what's the WiFi.status()
   return WiFi.status() == WL_CONNECTED;
 }
 
@@ -178,9 +247,6 @@ void handleRoot() {
     }
     server.arg(0).toCharArray(ssid, 100);
     String pwd = server.arg(1);
-    // TODO: do a full URL decode here
-    // TODO: do a full URL decode here
-    // TODO: do a full URL decode here
     // TODO: do a full URL decode here
     pwd.replace("%21", "!");
     pwd.toCharArray(pass, 100);
