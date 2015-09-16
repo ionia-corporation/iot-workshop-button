@@ -75,7 +75,8 @@ uint32_t sendPayload=0;
 
 /* Go to http://192.168.4.1 in a web browser
  * connected to this access point to see it. */
-void setup() {
+void setup()
+{
   //Set up the GPIO
   pinMode(LED_PIN, OUTPUT);
   pinMode(BUTTON_PIN, INPUT);
@@ -89,76 +90,59 @@ void setup() {
   Serial.print(WiFi.macAddress());
   Serial.println("]");
 
-  // test to see if we can connect with values from EEPROM
+  //If the user has already set up their WiFi creds before they'll be in EEPROM
   bool gotValidCredentials = 0;
-  Serial.println("Trying to read WiFi creds from EEPROM");
   EEPROM.get(WIFI_SSID_ADDR, ssid);
   EEPROM.get(WIFI_PASS_ADDR, pass);
   if(strlen(ssid) > 0) gotValidCredentials = 1;
+  else Serial.println("There are no valid credentials stored in the EEPROM");
 
-  if(gotValidCredentials){
+  if(gotValidCredentials)
+  {
     Serial.println("Trying to use the stored credentials:");
     Serial.println(String("\tSSID: [") + ssid + "]\n\tpass: [" + pass + "]");
-    if(tryWifiConnect()){
+    if(tryWifiConnect())
+    {
       sendPayload = 1;
     }else{
       play_led_sequence(ERR_WIFI_CONNECT_FAILED);
       setupAccessPoint();
     }
-  } else {
+  }else{
     Serial.println("no creds in EEPROM (yet) ");
     setupAccessPoint();
   }
-  
 }
 
-void loop() {
-  //JC's
-  //@TODO: Check the API for "WiFi mode (client/AP/...) and check for that instead of WiFi.status()
-  if(WiFi.status() == WL_CONNECTED){ //If we're in client mode and connected to a WiFi...
+void loop()
+{
+  if(WiFi.status() == WL_CONNECTED) //If we're in client mode and connected
+  {
     MQTT_connect();
-    if(testFeed.publish(sendPayload++)){
+    if(testFeed.publish(sendPayload++))
+    {
       Serial.println("MQTT message successfully published");
       play_led_sequence(ERR_OK);
-    } else {
+    }else{
       Serial.println("PUBLISH FAILED");
       play_led_sequence(ERR_MQTT_PUBLISH_FAILED);
     }
-    // TODO: make this a deep sleep instead (note you will have to store and retrieve Wifi creds!!!!)
+    // TODO: make this a deep sleep instead (note the ESP wakes up by rebooting)
     delay(5000);
 
-    //system_deep_sleep_set_option(0);
-    //system_deep_sleep(5000000);            // deep sleep for 5 seconds
-    ////ESP.deepsleep(5000, WAKE_RFCAL);
+    //ESP.deepsleep(5000000, WAKE_RFCAL); //time is in micro seconds
   }else{ //If we're in AP mode or simply not connected
     server.handleClient();
   }
-
-  // Paul's original logic workflow
-  /*
-  if(sendPayload > 0){
-    MQTT_connect();
-    if(! testFeed.publish(sendPayload++)){
-      Serial.println("PUBLISH FAILED!");
-    } else {
-      Serial.println("HOLY CRAP IT WORKED!");
-    }
-    // TODO: make this a deep sleep instead (note you will have to store and retrieve Wifi creds!!!!)
-    delay(5000);
-    //system_deep_sleep_set_option(0);
-    //system_deep_sleep(5000000);            // deep sleep for 5 seconds    
-    ////ESP.deepsleep(5000, WAKE_RFCAL);
-  }else{
-    server.handleClient();
-  }
-  */
 }
 
 #define SLOW_BLINK_DELAY 300
 #define FAST_BLINK_DELAY 100
 
-inline void led_seq_for(uint32_t loops, uint32_t delay_len) {
-  for(int i=0; i<loops; i++) {
+inline void led_seq_for(uint32_t loops, uint32_t delay_len)
+{
+  for(int i=0; i<loops; i++)
+  {
     delay(delay_len);
     digitalWrite(LED_PIN, HIGH);
     delay(delay_len);
@@ -166,7 +150,8 @@ inline void led_seq_for(uint32_t loops, uint32_t delay_len) {
   }
 }
 
-void play_led_sequence(uint16_t status) {
+void play_led_sequence(uint16_t status)
+{
   switch(status)
   {
     case ERR_OK:                     led_seq_for(2,  FAST_BLINK_DELAY); break;
@@ -178,13 +163,15 @@ void play_led_sequence(uint16_t status) {
   }
 }
 
-void setupAccessPoint() {
+void setupAccessPoint()
+{
   Serial.println();
   Serial.print("\nConfiguring access point...");
-  //@TODO: I believe the parameters in softAP are being ignored. My AP is called ESP_%c%c%c%c. Find out why.
+  //@TODO: I believe the parameters in softAP are being ignored. My AP is called
+  //       ESP_%c%c%c%c. Find out why.
   //@TODO: Generate a random number 1-13 to use as the WiFi channel in AP mode.
   /* You can pass 0 as the password parameter if you want the AP to be open. */
-  WiFi.softAP(ap_ssid, ap_pass, 1); //3rd argument is the WiFi channel
+  WiFi.softAP(ap_ssid, ap_pass, 1); //3rd argument is the WiFi channel (1-13)
 
   IPAddress myIP = WiFi.softAPIP();
   Serial.print("AP IP address: ");
@@ -198,7 +185,8 @@ void setupAccessPoint() {
      * return: true if the connection was successful. false otherwise.
      */
 //@TODO: This function should get passed ssid/pass instead of using globals
-bool tryWifiConnect(){
+bool tryWifiConnect()
+{
   WiFi.begin(ssid, pass);
   char err_cause[100] = "";
   switch(WiFi.waitForConnectResult())
@@ -223,16 +211,18 @@ bool tryWifiConnect(){
          WL_CONNECTION_LOST  = 5
          WL_DISCONNECTED     = 6
       */
-
-
   }
   return WiFi.status() == WL_CONNECTED;
 }
 
 /* Handle serving the webpage and getting the post */
-void handleRoot() {
-  if(server.args() > 0){
-    for(int x = 0; x < server.args(); x++){
+//@TODO: Simplify the implementation of this func. Split it into smaller ones?
+void handleRoot()
+{
+  if(server.args() > 0)
+  {
+    for(int x = 0; x < server.args(); x++)
+    {
       Serial.print(server.argName(x));
       Serial.print(":");
       Serial.println(server.arg(x));
@@ -252,7 +242,8 @@ void handleRoot() {
     Serial.println("checking status");
     //WiFi.softAPdisconnect(); //@TODO THIS IS WHERE IM AT. Do i need to disconnect the AP so trywificonnect does not have a status of WL_CONNECTED by default?
     WiFi.disconnect();
-    if(tryWifiConnect()){
+    if(tryWifiConnect())
+    {
       server.send(200, "text/html", "couldn't connect");
       Serial.println("couln't connect");
     }else{
@@ -264,28 +255,33 @@ void handleRoot() {
       sendPayload = 1;
     }
   }else{
+    //@TODO: Split this string into smaller ones. Fit them into 80char lines
     // TODO: push down JS to refresh the page 15 seconds after post
     server.send(200, "text/html", "<html><body><h1>Connect Me!</h1><form action='.' method='POST'><input type='text' name='ssid' placeholder='SSID' /><input type='password' name='pass' placeholder='password' /><input type='submit' value='connect!' /></form><p>(note that the page will not return any data if you end up successfully connecting to Wifi!)</p></body></html>");
   }
 }
 
 // Function to connect and reconnect as necessary to the MQTT server.
-void MQTT_connect() {
+void MQTT_connect()
+{
   int8_t ret;
 
   // Stop if already connected.
-  if (mqtt.connected()) {
+  if (mqtt.connected())
+  {
     return;
   }
 
   Serial.print("Connecting to MQTT... ");
-  for (int y = 0; y < 5 && (ret = mqtt.connect()) != 0; y++) { // connect will return 0 for connected
+  for (int y = 0; y < 5 && (ret = mqtt.connect()) != 0; y++)
+  { // connect will return 0 for connected
        Serial.println(mqtt.connectErrorString(ret));
        Serial.println("Retrying MQTT connection in 2 seconds...");
        mqtt.disconnect();
        delay(2000);  // wait 5 seconds
   }
-  if(mqtt.connect() == 0){
+  if(mqtt.connect() == 0)
+  {
     Serial.println("MQTT Connected!");
   }else{
     // not connected so reset wifi access point
