@@ -12,7 +12,6 @@ extern "C" {
 }
 
 /*************************** GPIO Setup **************************************/
-
 #define LED_PIN    13
 #define BUTTON_PIN 14
 
@@ -26,7 +25,6 @@ enum {
 };
 
 /*************************** Wifi Setup **************************************/
-
 // Acces Point
 const char *ap_ssid = "PaulsAccessPoint";
 const char *ap_pass = "lols";
@@ -38,14 +36,12 @@ char pass[100];
 #define WIFI_PASS_ADDR    100
 
 /*************************** MQTT Server *************************************/
-
 #define MQTT_SERVER_ADDR  "m11.cloudmqtt.com"
 #define MQTT_SERVERPORT   15848
 #define MQTT_USERNAME_S   "jehezims"
 #define MQTT_KEY          "Z1YgWLhMin_c"
 
 /************************** Global State ************************************/
-
 // Create an ESP8266 WiFiClient class to connect to the MQTT server.
 WiFiClient client;
 
@@ -60,7 +56,6 @@ const char MQTT_PASSWORD[] PROGMEM  = MQTT_KEY;
 Adafruit_MQTT_Client mqtt(&client, MQTT_SERVER, MQTT_SERVERPORT, MQTT_CLIENTID, MQTT_USERNAME, MQTT_PASSWORD);
 
 /****************************** Feeds ***************************************/
-
 const char TEST_FEED[] PROGMEM = "/testing";
 Adafruit_MQTT_Publish testFeed = Adafruit_MQTT_Publish(&mqtt, TEST_FEED);
 
@@ -71,8 +66,6 @@ Adafruit_MQTT_Subscribe onoffbutton = Adafruit_MQTT_Subscribe(&mqtt, ONOFF_FEED)
 */
 
 /***************************** Program **************************************/
-uint32_t sendPayload=0;
-
 /* Go to http://192.168.4.1 in a web browser
  * connected to this access point to see it. */
 void setup()
@@ -95,16 +88,14 @@ void setup()
   EEPROM.get(WIFI_SSID_ADDR, ssid);
   EEPROM.get(WIFI_PASS_ADDR, pass);
   if(strlen(ssid) > 0) gotValidCredentials = 1;
-  else Serial.println("There are no valid credentials stored in the EEPROM");
+  else Serial.println("There are no WiFi credentials stored in the EEPROM");
 
   if(gotValidCredentials)
   {
-    Serial.println("Trying to use the stored credentials:");
+    Serial.println("Trying to use the stored WiFi credentials:");
     Serial.println(String("\tSSID: [") + ssid + "]\n\tpass: [" + pass + "]");
-    if(tryWifiConnect())
+    if(!tryWifiConnect())
     {
-      sendPayload = 1;
-    }else{
       play_led_sequence(ERR_WIFI_CONNECT_FAILED);
       setupAccessPoint();
     }
@@ -119,7 +110,7 @@ void loop()
   if(WiFi.status() == WL_CONNECTED) //If we're in client mode and connected
   {
     MQTT_connect();
-    if(testFeed.publish(sendPayload++))
+    if(testFeed.publish("Our pub payload!"))
     {
       Serial.println("MQTT message successfully published");
       play_led_sequence(ERR_OK);
@@ -128,9 +119,14 @@ void loop()
       play_led_sequence(ERR_MQTT_PUBLISH_FAILED);
     }
     // TODO: make this a deep sleep instead (note the ESP wakes up by rebooting)
-    delay(5000);
+    //delay(5000);
 
-    //ESP.deepsleep(5000000, WAKE_RFCAL); //time is in micro seconds
+    // IMPORTANT: Deep-sleep will wake up by rebooting the ESP8266.
+    //            For it to work, the pins 16 and RST need to be shorted
+    // This call never returns
+    ESP.deepSleep(5000000, WAKE_RFCAL); //time is in micro seconds
+    //@TODO: Figure out why we need this endless loop:
+    while(1) delay(1000); //stop the program from re-entering loop()
   }else{ //If we're in AP mode or simply not connected
     server.handleClient();
   }
@@ -240,24 +236,34 @@ void handleRoot()
     EEPROM.commit();
 
     Serial.println("checking status");
-    //WiFi.softAPdisconnect(); //@TODO THIS IS WHERE IM AT. Do i need to disconnect the AP so trywificonnect does not have a status of WL_CONNECTED by default?
-    WiFi.disconnect();
+    WiFi.disconnect(); // Disconnect the AP before trying to connect as a client
     if(tryWifiConnect())
     {
       server.send(200, "text/html", "couldn't connect");
       Serial.println("couln't connect");
     }else{
-      //// NOTE: cannot return a page that says I've connected because
-      ////       the access point isn't live when connected as a client
+      // NOTE: cannot return a page that says I've connected because
+      //       the access point isn't live when connected as a client
       //server.send(200, "text/html", "connected!@#$%");=
       Serial.println("connected!!");
-      // set payload to 1 as a flag for MQTT to know to connect
-      sendPayload = 1;
     }
   }else{
-    //@TODO: Split this string into smaller ones. Fit them into 80char lines
     // TODO: push down JS to refresh the page 15 seconds after post
-    server.send(200, "text/html", "<html><body><h1>Connect Me!</h1><form action='.' method='POST'><input type='text' name='ssid' placeholder='SSID' /><input type='password' name='pass' placeholder='password' /><input type='submit' value='connect!' /></form><p>(note that the page will not return any data if you end up successfully connecting to Wifi!)</p></body></html>");
+    // Build a string with the contents of the main page:
+    String mainPage = "";
+    mainPage += "<html>";
+    mainPage += "<body>";
+    mainPage += "<h1>Connect Me!</h1>";
+    mainPage += "<form action='.' method='POST'>";
+    mainPage += "<input type='text' name='ssid' placeholder='SSID' />";
+    mainPage += "<input type='password' name='pass' placeholder='password' />";
+    mainPage += "<input type='submit' value='connect!' />";
+    mainPage += "</form>";
+    mainPage += "<p>(note that the page will not return any data if you ";
+    mainPage += "end up successfully connecting to Wifi!)</p>";
+    mainPage += "</body>";
+    mainPage += "</html>";
+    server.send(200, "text/html", mainPage);
   }
 }
 
@@ -286,6 +292,5 @@ void MQTT_connect()
   }else{
     // not connected so reset wifi access point
     setupAccessPoint();
-    sendPayload = 0;
   }
 }
