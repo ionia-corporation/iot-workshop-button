@@ -114,7 +114,7 @@ void setup() {
     Serial.print("pass: [");
     Serial.print(pass);
     Serial.println("]");
-    if(tryWifiConnect()){
+    if(tryWifiConnect() == WL_CONNECTED){
       Serial.println("connect succeeded!");
       sendPayload = 1;
     }else{
@@ -184,12 +184,12 @@ inline void led_seq_for(uint32_t loops, uint32_t delay_len) {
 void play_led_sequence(uint16_t status) {
   switch(status)
   {
-    case ERR_OK:                      led_seq_for(3, FAST_BLINK_DELAY);  break;
-    case ERR_WIFI_CONNECT_FAILED:     led_seq_for(5, SLOW_BLINK_DELAY);  break;
-    case ERR_MQTT_CONNECTION_FAILED:  led_seq_for(10, SLOW_BLINK_DELAY); break;
-    case ERR_MQTT_PUBLISH_FAILED:     led_seq_for(2, SLOW_BLINK_DELAY);  break;
-    case ERR_MQTT_UNEXPECTED_DISC:    led_seq_for(10, SLOW_BLINK_DELAY); break;
-    case ERR_SERVER_ISSUE:            led_seq_for(7, SLOW_BLINK_DELAY);  break;
+    case ERR_OK:                     led_seq_for(3,  FAST_BLINK_DELAY); break;
+    case ERR_WIFI_CONNECT_FAILED:    led_seq_for(5,  SLOW_BLINK_DELAY); break;
+    case ERR_MQTT_CONNECTION_FAILED: led_seq_for(10, SLOW_BLINK_DELAY); break;
+    case ERR_MQTT_PUBLISH_FAILED:    led_seq_for(2,  SLOW_BLINK_DELAY); break;
+    case ERR_MQTT_UNEXPECTED_DISC:   led_seq_for(10, SLOW_BLINK_DELAY); break;
+    case ERR_SERVER_ISSUE:           led_seq_for(7,  SLOW_BLINK_DELAY); break;
   }
 }
 
@@ -220,19 +220,40 @@ void setupAccessPoint() {
   Serial.println("HTTP server started");
 }
 
+/*
+from wl_definitions.h:
+    typedef enum {
+        WL_NO_SHIELD        = 255, // for compatibility with WiFi Shield library
+        WL_IDLE_STATUS      = 0,
+        WL_NO_SSID_AVAIL    = 1,
+        WL_SCAN_COMPLETED   = 2,
+        WL_CONNECTED        = 3,
+        WL_CONNECT_FAILED   = 4,
+        WL_CONNECTION_LOST  = 5,
+        WL_DISCONNECTED     = 6
+    } wl_status_t;
+*/
 bool tryWifiConnect(){
-  //WiFi.begin(ssid, pass);
-  //char s[100];
-  //char p[100];
-  //ssid.toCharArray(s, 100);
-  //pass.toCharArray(p, 100);
-  //WiFi.begin(s, p);
-  //WiFi.begin("SKYD6F7B", "CBECPTFA");
+  WiFi.begin(ssid, pass);
+  switch(WiFi.waitForConnectResult())
+  {
+    case WL_CONNECTED:
+      Serial.println("Success! Connection to the AP stablished");
+      break;
+    case WL_DISCONNECTED:
+      Serial.println("Connection failed. Is the mode set to STA?");
+      break;
+    default:
+      Serial.print("Connection to AP failed with status ");
+      Serial.println(WiFi.status()); //Failing with status 1 when reading creds from eeprom.
+  }
+  /*
   for(int y = 0; y < 6 && WiFi.status() != WL_CONNECTED; y++){
     delay(1500);
     Serial.print("\tFailed to connect. WiFi.status() is ");
     Serial.println(WiFi.status());
   }
+  */
   //@TODO: Is this WL_CONNECTED the reason why this function is returning false? See if there's a delay when setting WiFi.status or something. println what's the WiFi.status()
   return WiFi.status() == WL_CONNECTED;
 }
@@ -258,7 +279,8 @@ void handleRoot() {
     EEPROM.commit();
 
     Serial.println("checking status");
-    if(tryWifiConnect()){
+    softAPdisconnect(); //@TODO THIS IS WHERE IM AT. Do i need to disconnect the AP so trywificonnect does not have a status of WL_CONNECTED by default?
+    if(tryWifiConnect() == WL_CONNECTED){
       server.send(200, "text/html", "couldn't connect");
       Serial.println("couln't connect");
     }else{
