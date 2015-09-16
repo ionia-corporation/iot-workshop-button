@@ -80,45 +80,28 @@ void setup() {
   pinMode(LED_PIN, OUTPUT);
   pinMode(BUTTON_PIN, INPUT);
   // TODO: test if this initial delay is necessary
-  delay(5000);
   Serial.begin(115200);
   EEPROM.begin(4096);
 
-  //@TODO: This line is just a test. Remove it. Maybe use the Chip ID to uniquely identify the AP?
-  Serial.println(ESP.getChipId());
+  Serial.print("\nWelcome! The chip ID of your ESP8266 is [");
+  Serial.print(ESP.getChipId());
+  Serial.print("] and your MAC address [");
+  Serial.print(WiFi.macAddress());
+  Serial.println("]");
 
   // test to see if we can connect with values from EEPROM
-  bool gotValidCredentials = 1;
-  Serial.println("trying to read WiFi creds from EEPROM");
-  //gotValidCredentials  = read_eeprom_string(WIFI_SSID_ADDR, ssid, 100);
-  //gotValidCredentials &= read_eeprom_string(WIFI_PASS_ADDR, pass, 100);
+  bool gotValidCredentials = 0;
+  Serial.println("Trying to read WiFi creds from EEPROM");
   EEPROM.get(WIFI_SSID_ADDR, ssid);
   EEPROM.get(WIFI_PASS_ADDR, pass);
-
-  /*
-  Serial.println("<Debugging>");
-  for(int i=0; i<100; i++)
-  {
-    Serial.print(i);
-    Serial.println(ssid[i]);
-    if(ssid[i] == '\0') break;
-  }
-  Serial.println("</Debugging>");
-  */
+  if(strlen(ssid) > 0) gotValidCredentials = 1;
 
   if(gotValidCredentials){
-    Serial.println("trying to use creds from EEPROM");
-    Serial.print("ssid: [");
-    Serial.print(ssid);
-    Serial.println("]");
-    Serial.print("pass: [");
-    Serial.print(pass);
-    Serial.println("]");
-    if(tryWifiConnect() == WL_CONNECTED){
-      Serial.println("connect succeeded!");
+    Serial.println("Trying to use the stored credentials:");
+    Serial.println(String("\tSSID: [") + ssid + "]\n\tpass: [" + pass + "]");
+    if(tryWifiConnect()){
       sendPayload = 1;
     }else{
-      Serial.println("connect failed :(");
       play_led_sequence(ERR_WIFI_CONNECT_FAILED);
       setupAccessPoint();
     }
@@ -134,10 +117,12 @@ void loop() {
   //@TODO: Check the API for "WiFi mode (client/AP/...) and check for that instead of WiFi.status()
   if(WiFi.status() == WL_CONNECTED){ //If we're in client mode and connected to a WiFi...
     MQTT_connect();
-    if(! testFeed.publish(sendPayload++)){
-      Serial.println("PUBLISH FAILED");
-    } else {
+    if(testFeed.publish(sendPayload++)){
       Serial.println("MQTT message successfully published");
+      play_led_sequence(ERR_OK);
+    } else {
+      Serial.println("PUBLISH FAILED");
+      play_led_sequence(ERR_MQTT_PUBLISH_FAILED);
     }
     // TODO: make this a deep sleep instead (note you will have to store and retrieve Wifi creds!!!!)
     delay(5000);
@@ -184,7 +169,7 @@ inline void led_seq_for(uint32_t loops, uint32_t delay_len) {
 void play_led_sequence(uint16_t status) {
   switch(status)
   {
-    case ERR_OK:                     led_seq_for(3,  FAST_BLINK_DELAY); break;
+    case ERR_OK:                     led_seq_for(2,  FAST_BLINK_DELAY); break;
     case ERR_WIFI_CONNECT_FAILED:    led_seq_for(5,  SLOW_BLINK_DELAY); break;
     case ERR_MQTT_CONNECTION_FAILED: led_seq_for(10, SLOW_BLINK_DELAY); break;
     case ERR_MQTT_PUBLISH_FAILED:    led_seq_for(2,  SLOW_BLINK_DELAY); break;
@@ -193,24 +178,13 @@ void play_led_sequence(uint16_t status) {
   }
 }
 
-bool read_eeprom_string(int addr, char* buffer, int max_size) {
-  for(int i=0; i<max_size; i++){
-    //EEPROM.get(addr+(i*sizeof(char)), buffer[i]);
-    buffer[i] = EEPROM.read(addr+i);
-    if(buffer[i] == '\0'){
-      Serial.println(i);
-      return true;
-    }
-  }
-  return false;
-}
-
 void setupAccessPoint() {
   Serial.println();
-  Serial.print("Configuring access point...");
+  Serial.print("\nConfiguring access point...");
   //@TODO: I believe the parameters in softAP are being ignored. My AP is called ESP_%c%c%c%c. Find out why.
-  /* You can remove the password parameter if you want the AP to be open. */
-  WiFi.softAP(ap_ssid, ap_pass);
+  //@TODO: Generate a random number 1-13 to use as the WiFi channel in AP mode.
+  /* You can pass 0 as the password parameter if you want the AP to be open. */
+  WiFi.softAP(ap_ssid, ap_pass, 1); //3rd argument is the WiFi channel
 
   IPAddress myIP = WiFi.softAPIP();
   Serial.print("AP IP address: ");
@@ -220,41 +194,38 @@ void setupAccessPoint() {
   Serial.println("HTTP server started");
 }
 
-/*
-from wl_definitions.h:
-    typedef enum {
-        WL_NO_SHIELD        = 255, // for compatibility with WiFi Shield library
-        WL_IDLE_STATUS      = 0,
-        WL_NO_SSID_AVAIL    = 1,
-        WL_SCAN_COMPLETED   = 2,
-        WL_CONNECTED        = 3,
-        WL_CONNECT_FAILED   = 4,
-        WL_CONNECTION_LOST  = 5,
-        WL_DISCONNECTED     = 6
-    } wl_status_t;
-*/
+/* Connect to a network.
+     * return: true if the connection was successful. false otherwise.
+     */
+//@TODO: This function should get passed ssid/pass instead of using globals
 bool tryWifiConnect(){
   WiFi.begin(ssid, pass);
+  char err_cause[100] = "";
   switch(WiFi.waitForConnectResult())
   {
     case WL_CONNECTED:
       Serial.println("Success! Connection to the AP stablished");
       break;
     case WL_DISCONNECTED:
-      Serial.println("Connection failed. Is the mode set to STA?");
+      Serial.println("Connection to AP failed. Is the mode set to STA?");
       break;
+    case WL_NO_SSID_AVAIL:
+      Serial.println("Connection to AP failed. Network does not exist");
     default:
       Serial.print("Connection to AP failed with status ");
-      Serial.println(WiFi.status()); //Failing with status 1 when reading creds from eeprom.
+      Serial.println(WiFi.status());
+      /* Meaning of each status code as defined in wl_definitions.h:
+         WL_IDLE_STATUS      = 0
+         WL_NO_SSID_AVAIL    = 1
+         WL_SCAN_COMPLETED   = 2
+         WL_CONNECTED        = 3
+         WL_CONNECT_FAILED   = 4
+         WL_CONNECTION_LOST  = 5
+         WL_DISCONNECTED     = 6
+      */
+
+
   }
-  /*
-  for(int y = 0; y < 6 && WiFi.status() != WL_CONNECTED; y++){
-    delay(1500);
-    Serial.print("\tFailed to connect. WiFi.status() is ");
-    Serial.println(WiFi.status());
-  }
-  */
-  //@TODO: Is this WL_CONNECTED the reason why this function is returning false? See if there's a delay when setting WiFi.status or something. println what's the WiFi.status()
   return WiFi.status() == WL_CONNECTED;
 }
 
@@ -279,8 +250,9 @@ void handleRoot() {
     EEPROM.commit();
 
     Serial.println("checking status");
-    softAPdisconnect(); //@TODO THIS IS WHERE IM AT. Do i need to disconnect the AP so trywificonnect does not have a status of WL_CONNECTED by default?
-    if(tryWifiConnect() == WL_CONNECTED){
+    //WiFi.softAPdisconnect(); //@TODO THIS IS WHERE IM AT. Do i need to disconnect the AP so trywificonnect does not have a status of WL_CONNECTED by default?
+    WiFi.disconnect();
+    if(tryWifiConnect()){
       server.send(200, "text/html", "couldn't connect");
       Serial.println("couln't connect");
     }else{
