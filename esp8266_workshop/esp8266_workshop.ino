@@ -73,7 +73,8 @@ void setup()
   //Set up the GPIO
   pinMode(LED_PIN, OUTPUT);
   pinMode(BUTTON_PIN, INPUT);
-  // TODO: test if this initial delay is necessary
+
+  //Initialise UART and EEPROM
   Serial.begin(115200);
   EEPROM.begin(4096);
 
@@ -146,8 +147,11 @@ inline void led_seq_for(uint32_t loops, uint32_t delay_len)
   }
 }
 
+//@TODO: Make sure this ifdef works fine. Explain how to use it in a comment.
+#define LED_DEBUGGING_ENABLED
 void play_led_sequence(uint16_t status)
 {
+  #ifdef LED_DEBUGGING_ENABLED
   switch(status)
   {
     case ERR_OK:                     led_seq_for(2,  FAST_BLINK_DELAY); break;
@@ -157,6 +161,7 @@ void play_led_sequence(uint16_t status)
     case ERR_MQTT_UNEXPECTED_DISC:   led_seq_for(10, SLOW_BLINK_DELAY); break;
     case ERR_SERVER_ISSUE:           led_seq_for(7,  SLOW_BLINK_DELAY); break;
   }
+  #endif
 }
 
 void setupAccessPoint()
@@ -208,11 +213,60 @@ bool tryWifiConnect()
          WL_DISCONNECTED     = 6
       */
   }
-  return WiFi.status() == WL_CONNECTED;
+  return (WiFi.status() == WL_CONNECTED);
+}
+
+byte ascii_char_to_byte(char c)
+{
+  c = toupper(c);
+  switch(c)
+  {
+    case '0': return 0x00;
+    case '1': return 0x01;
+    case '2': return 0x02;
+    case '3': return 0x03;
+    case '4': return 0x04;
+    case '5': return 0x05;
+    case '6': return 0x06;
+    case '7': return 0x07;
+    case '8': return 0x08;
+    case '9': return 0x09;
+    case 'A': return 0x0A;
+    case 'B': return 0x0B;
+    case 'C': return 0x0C;
+    case 'D': return 0x0D;
+    case 'E': return 0x0E;
+    case 'F': return 0x0F;
+  }
+}
+
+bool decode_url_string(char *dst, char *src)
+{
+  uint32_t dst_idx = 0;
+  char debug = 0x00;
+  for(uint32_t i=0; i< strlen(src); i++)
+  {
+    if(src[i] == '%')
+    {
+      //@CHECK: ++i instead of i++, right??
+      dst[dst_idx]  = ascii_char_to_byte(src[++i]) & 0x0F;
+      dst[dst_idx]  = dst[dst_idx] << 4;
+      dst[dst_idx] |= ascii_char_to_byte(src[++i]) & 0x0F;
+    }
+    else
+    {
+      dst[dst_idx] += src[i];
+    }
+    Serial.println(String("\ti = ") + i);
+    Serial.println(String("\td = ") + dst_idx);
+    dst_idx++;
+  }
+  dst[dst_idx] = '\0';
 }
 
 /* Handle serving the webpage and getting the post */
 //@TODO: Simplify the implementation of this func. Split it into smaller ones?
+//@TODO: Rename the function to use a more descriptive name
 void handleRoot()
 {
   if(server.args() > 0)
@@ -225,9 +279,7 @@ void handleRoot()
     }
     server.arg(0).toCharArray(ssid, 100);
     String pwd = server.arg(1);
-    // TODO: do a full URL decode here
-    pwd.replace("%21", "!");
-    pwd.toCharArray(pass, 100);
+    decode_url_string(pass, pwd);
     Serial.print("new pwd: ");
     Serial.println(pwd);
     EEPROM.put(WIFI_SSID_ADDR, ssid);
@@ -239,6 +291,8 @@ void handleRoot()
     WiFi.disconnect(); // Disconnect the AP before trying to connect as a client
     if(tryWifiConnect())
     {
+      //@TODO?: Include the reason why the connection failed in the HTTP resp
+      //        tryWifiConnect() will have to be modified to return the reason.
       server.send(200, "text/html", "couldn't connect");
       Serial.println("couln't connect");
     }else{
