@@ -218,6 +218,15 @@ bool tryWifiConnect()
 
 byte ascii_char_to_byte(char c)
 {
+  // URI character encoding writes substitutes disallowed characters with the
+  // HEX value of their ASCII representation prepended by a '%'.
+  // For example: When the ASCII symbol '$' is stored somewhere, it is stored as
+  // 00100100 in binary. The HEX representation of that binary value is 0x24,
+  // so it gets substituted in the URL with '%24'.
+  // Unfortunately, there's no direct relation between the binary representation
+  // of the ASCII character 'A' (01000001) or 'a' (01100001) and the hex number
+  // 0x0A (00001010). That's why this conversion from ASCII 'A' to hex A needs
+  // to be hardcoded like this:
   c = toupper(c);
   switch(c)
   {
