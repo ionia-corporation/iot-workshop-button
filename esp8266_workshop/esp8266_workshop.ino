@@ -218,34 +218,18 @@ bool tryWifiConnect()
 
 byte ascii_char_to_byte(char c)
 {
-  // URI character encoding writes substitutes disallowed characters with the
-  // HEX value of their ASCII representation prepended by a '%'.
-  // For example: When the ASCII symbol '$' is stored somewhere, it is stored as
-  // 00100100 in binary. The HEX representation of that binary value is 0x24,
-  // so it gets substituted in the URL with '%24'.
-  // Unfortunately, there's no direct relation between the binary representation
-  // of the ASCII character 'A' (01000001) or 'a' (01100001) and the hex number
-  // 0x0A (00001010). That's why this conversion from ASCII 'A' to hex A needs
-  // to be hardcoded like this:
   c = toupper(c);
   switch(c)
   {
-    case '0': return 0x00;
-    case '1': return 0x01;
-    case '2': return 0x02;
-    case '3': return 0x03;
-    case '4': return 0x04;
-    case '5': return 0x05;
-    case '6': return 0x06;
-    case '7': return 0x07;
-    case '8': return 0x08;
-    case '9': return 0x09;
     case 'A': return 0x0A;
     case 'B': return 0x0B;
     case 'C': return 0x0C;
     case 'D': return 0x0D;
     case 'E': return 0x0E;
     case 'F': return 0x0F;
+    default:
+      c &= 0x0F;
+      return c;
   }
 }
 
@@ -257,7 +241,6 @@ bool decode_url_string(char *dst, char *src)
   {
     if(src[i] == '%')
     {
-      //@CHECK: ++i instead of i++, right??
       dst[dst_idx]  = ascii_char_to_byte(src[++i]) & 0x0F;
       dst[dst_idx]  = dst[dst_idx] << 4;
       dst[dst_idx] |= ascii_char_to_byte(src[++i]) & 0x0F;
@@ -266,8 +249,6 @@ bool decode_url_string(char *dst, char *src)
     {
       dst[dst_idx] += src[i];
     }
-    Serial.println(String("\ti = ") + i);
-    Serial.println(String("\td = ") + dst_idx);
     dst_idx++;
   }
   dst[dst_idx] = '\0';
@@ -288,9 +269,10 @@ void handleRoot()
     }
     server.arg(0).toCharArray(ssid, 100);
     String pwd = server.arg(1);
-    decode_url_string(pass, pwd);
+    pwd.toCharArray(pass, 100);
+    decode_url_string(ssid, pass);
     Serial.print("new pwd: ");
-    Serial.println(pwd);
+    Serial.println(pass);
     EEPROM.put(WIFI_SSID_ADDR, ssid);
     EEPROM.put(WIFI_PASS_ADDR, pass);
     Serial.println("Commiting ssid and pass to EEPROM");
