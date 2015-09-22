@@ -40,8 +40,8 @@ enum {
 
 /*************************** Wifi Setup **************************************/
 // Acces Point
-const char *ap_ssid = "PaulsAccessPoint";
-const char *ap_pass = "lols";
+const char *ap_ssid = "InigoMontoya";
+const char *ap_pass = "IocaneRules"; //Min. 8 characters
 ESP8266WebServer server(80);
 // Client
 char ssid[DEFAULT_BUFFER_SIZE];
@@ -179,7 +179,7 @@ void loop()
     static char mqtt_response[DEFAULT_BUFFER_SIZE] = "";
     static bool got_response = false;
     Adafruit_MQTT_Subscribe *subscription;
-    while ((subscription = mqtt.readSubscription(RESPONSE_WAITING_TIME)))
+    while ((subscription = mqtt.readSubscription(RESPONSE_WAITING_TIME))) //@TODO: This timeout does not seem to wrk (function returns right away even when there are no messages sent to the response topic
     {
       if (subscription == &respTopic)
       {
@@ -228,8 +228,6 @@ void setupAccessPoint()
 {
   Serial.println();
   Serial.print("\nConfiguring access point...");
-  //@TODO: I believe the parameters in softAP are being ignored. My AP is called
-  //       ESP_%c%c%c%c. Find out why.
   //@TODO: Generate a random number 1-13 to use as the WiFi channel in AP mode.
   /* You can pass 0 as the password parameter if you want the AP to be open. */
   WiFi.softAP(ap_ssid, ap_pass, 1); //3rd argument is the WiFi channel (1-13)
@@ -237,7 +235,7 @@ void setupAccessPoint()
   IPAddress myIP = WiFi.softAPIP();
   Serial.print("AP IP address: ");
   Serial.println(myIP);
-  server.on("/", handleRoot);
+  server.on("/", handle_http_root);
   server.begin();
   Serial.println("HTTP server started");
 }
@@ -313,15 +311,34 @@ bool decode_url_string(char *dst, char *src)
   dst[dst_idx] = '\0';
 }
 
-/* Handle serving the webpage and getting the post */
-//@TODO: Simplify the implementation of this func. Split it into smaller ones?
-//@TODO: Rename the function to use a more descriptive name
-void handleRoot()
+inline void serve_main_page()
 {
-  if(server.args() > 0) //The user sent the credentials via HTTP
+  // TODO: push down JS to refresh the page 15 seconds after post
+  // Build a string with the contents of the main page:
+  String mainPage = "";
+  mainPage += "<html>";
+  mainPage += "<body>";
+  mainPage += "<h1>Connect Me!</h1>";
+  mainPage += "<form action='.' method='POST'>";
+  mainPage += "<input type='text' name='ssid' placeholder='SSID' />";
+  mainPage += "<input type='password' name='pass' placeholder='password' />";
+  mainPage += "<input type='submit' value='connect!' />";
+  mainPage += "</form>";
+  mainPage += "<p>(note that the page will not return any data if you ";
+  mainPage += "end up successfully connecting to Wifi!)</p>";
+  mainPage += "</body>";
+  mainPage += "</html>";
+  server.send(200, "text/html", mainPage);
+}
+
+/* Handle serving the webpage and getting the post */
+void handle_http_root()
+{
+  if(server.args() > 0) //The user sent the credentials via HTTP POST
   {
     /*
-    for(int x = 0; x < server.args(); x++) //Print all received args (encoded)
+    //Print all received args (encoded)
+    for(int x = 0; x < server.args(); x++)
     {
       Serial.print(server.argName(x));
       Serial.print(":");
@@ -352,22 +369,7 @@ void handleRoot()
       server.send(200, "text/html", "Couldn't connect to the WiFi network");
     }
   }else{
-    // TODO: push down JS to refresh the page 15 seconds after post
-    // Build a string with the contents of the main page:
-    String mainPage = "";
-    mainPage += "<html>";
-    mainPage += "<body>";
-    mainPage += "<h1>Connect Me!</h1>";
-    mainPage += "<form action='.' method='POST'>";
-    mainPage += "<input type='text' name='ssid' placeholder='SSID' />";
-    mainPage += "<input type='password' name='pass' placeholder='password' />";
-    mainPage += "<input type='submit' value='connect!' />";
-    mainPage += "</form>";
-    mainPage += "<p>(note that the page will not return any data if you ";
-    mainPage += "end up successfully connecting to Wifi!)</p>";
-    mainPage += "</body>";
-    mainPage += "</html>";
-    server.send(200, "text/html", mainPage);
+    serve_main_page();
   }
 }
 
