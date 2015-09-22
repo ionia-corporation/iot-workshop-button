@@ -11,9 +11,17 @@ extern "C" {
   #include "user_interface.h"
 }
 
+#define DEFAULT_BUFFER_SIZE 100 //Buffer size to use for creds, messages, etc.
+
 /*************************** GPIO Setup **************************************/
 #define LED_PIN    13
-#define BUTTON_PIN 14
+
+/*************************** Workflow Variables *******************************/
+#define RESPONSE_WAITING_TIME 60000 //Wait for an MQTT response for up to 1min
+#define LED_DEBUGGING_ENABLED true  //Enable LED debugging (blink LED to report
+                                    //system status). See play_led_sequence()
+#define SLOW_BLINK_DELAY 300
+#define FAST_BLINK_DELAY 100
 
 enum {
   ERR_OK                      = 0,
@@ -24,14 +32,20 @@ enum {
   ERR_SERVER_ISSUE            = 5
 };
 
+enum {
+    LED_USER_COMING  = 0,
+    LED_USER_AWAY    = 1,
+    LED_USER_TIMEOUT = 2
+};
+
 /*************************** Wifi Setup **************************************/
 // Acces Point
 const char *ap_ssid = "PaulsAccessPoint";
 const char *ap_pass = "lols";
 ESP8266WebServer server(80);
 // Client
-char ssid[100];
-char pass[100];
+char ssid[DEFAULT_BUFFER_SIZE];
+char pass[DEFAULT_BUFFER_SIZE];
 #define WIFI_SSID_ADDR    0
 #define WIFI_PASS_ADDR    100
 
@@ -55,24 +69,63 @@ const char MQTT_PASSWORD[] PROGMEM  = MQTT_KEY;
 // Setup the MQTT client class by passing in the WiFi client and MQTT server and login details.
 Adafruit_MQTT_Client mqtt(&client, MQTT_SERVER, MQTT_SERVERPORT, MQTT_CLIENTID, MQTT_USERNAME, MQTT_PASSWORD);
 
-/****************************** Feeds ***************************************/
-const char TEST_FEED[] PROGMEM = "/testing";
-Adafruit_MQTT_Publish testFeed = Adafruit_MQTT_Publish(&mqtt, TEST_FEED);
+/****************************** Topics ***************************************/
 
-/*
-// Setup a feed called 'onoff' for subscribing to changes.
-const char ONOFF_FEED[] PROGMEM = AIO_USERNAME "/feeds/onoff";
-Adafruit_MQTT_Subscribe onoffbutton = Adafruit_MQTT_Subscribe(&mqtt, ONOFF_FEED);
-*/
+//This is the topic we'll publish to when the device boots up. Pressing the
+//connected between RST and GND causes a reboot
+const char BUTTON_TOPIC[] PROGMEM = "/testing";
+Adafruit_MQTT_Publish buttonTopic = Adafruit_MQTT_Publish(&mqtt, BUTTON_TOPIC);
+
+//This is the topic we subscribe to in order to receive the user's response
+//after the RST button is pressed. We wait for incoming messages for 1 minute
+//after boot:
+const char RESPONSE_TOPIC[] PROGMEM = "/resp";
+Adafruit_MQTT_Subscribe respTopic = Adafruit_MQTT_Subscribe(&mqtt, RESPONSE_TOPIC);
 
 /***************************** Program **************************************/
+inline void led_seq_for(uint32_t loops, uint32_t delay_len)
+{
+  for(int i=0; i<loops; i++)
+  {
+    delay(delay_len);
+    digitalWrite(LED_PIN, HIGH);
+    delay(delay_len);
+    digitalWrite(LED_PIN, LOW);
+  }
+}
+
+void play_led_sequence(uint16_t status, bool is_debug_sequence=false)
+{
+  if(is_debug_sequence==true)
+  {
+    if(!LED_DEBUGGING_ENABLED) return;
+    switch(status)
+    {
+      case ERR_OK:                     led_seq_for(2,  FAST_BLINK_DELAY); break;
+      case ERR_WIFI_CONNECT_FAILED:    led_seq_for(5,  SLOW_BLINK_DELAY); break;
+      case ERR_MQTT_CONNECTION_FAILED: led_seq_for(10, SLOW_BLINK_DELAY); break;
+      case ERR_MQTT_PUBLISH_FAILED:    led_seq_for(2,  SLOW_BLINK_DELAY); break;
+      case ERR_MQTT_UNEXPECTED_DISC:   led_seq_for(10, SLOW_BLINK_DELAY); break;
+      case ERR_SERVER_ISSUE:           led_seq_for(7,  SLOW_BLINK_DELAY); break;
+    }
+    return;
+  }
+  //If it's not a debug sequence but a functional one (for the end user):
+  switch(status)
+  {
+    case LED_USER_COMING:   led_seq_for(20, SLOW_BLINK_DELAY); break;
+    case LED_USER_AWAY:     led_seq_for(10, FAST_BLINK_DELAY); break;
+    case LED_USER_TIMEOUT:  led_seq_for(5,  FAST_BLINK_DELAY); break;
+    default: Serial.println("Error! Unrecognised functional LED sequence");
+  }
+}
+
 /* Go to http://192.168.4.1 in a web browser
  * connected to this access point to see it. */
 void setup()
 {
   //Set up the GPIO
   pinMode(LED_PIN, OUTPUT);
-  pinMode(BUTTON_PIN, INPUT);
 
   //Initialise UART and EEPROM
   Serial.begin(115200);
@@ -97,7 +150,7 @@ void setup()
     Serial.println(String("\tSSID: [") + ssid + "]\n\tpass: [" + pass + "]");
     if(!tryWifiConnect())
     {
-      play_led_sequence(ERR_WIFI_CONNECT_FAILED);
+      play_led_sequence(ERR_WIFI_CONNECT_FAILED, true);
       setupAccessPoint();
     }
   }else{
@@ -110,58 +163,65 @@ void loop()
 {
   if(WiFi.status() == WL_CONNECTED) //If we're in client mode and connected
   {
+    mqtt.subscribe(&respTopic); //Subscribe to the response topic
     MQTT_connect();
-    if(testFeed.publish("Our pub payload!"))
+    if(!buttonTopic.publish("Our pub payload!"))
     {
-      Serial.println("MQTT message successfully published");
-      play_led_sequence(ERR_OK);
-    }else{
       Serial.println("PUBLISH FAILED");
-      play_led_sequence(ERR_MQTT_PUBLISH_FAILED);
+      play_led_sequence(ERR_MQTT_PUBLISH_FAILED, true);
+    }else{
+      Serial.println("MQTT message successfully published");
+      play_led_sequence(ERR_OK, true);
     }
-    // TODO: make this a deep sleep instead (note the ESP wakes up by rebooting)
-    //delay(5000);
+
+    //Wait for a message in the respTopic MQTT topic. If we haven't received one
+    //after ${RESPONSE_WAITING_TIME} ms, time out.
+    static char mqtt_response[DEFAULT_BUFFER_SIZE] = "";
+    static bool got_response = false;
+    Adafruit_MQTT_Subscribe *subscription;
+    while ((subscription = mqtt.readSubscription(RESPONSE_WAITING_TIME)))
+    {
+      if (subscription == &respTopic)
+      {
+        strncpy(mqtt_response, (char *)respTopic.lastread, DEFAULT_BUFFER_SIZE);
+        got_response = true;
+      }
+    }
+
+    if(got_response == true) //Got a response via MQTT!
+    {
+      Serial.print(F("Received MQTT message: "));
+      Serial.println(mqtt_response);
+      if(strncmp(mqtt_response, "user_away", DEFAULT_BUFFER_SIZE))
+      {
+        Serial.println("\tPlaying the LED_USER_AWAY sequence...");
+        play_led_sequence(LED_USER_AWAY);
+      }
+      else if(strncmp(mqtt_response, "user_coming", DEFAULT_BUFFER_SIZE))
+      {
+        Serial.println("\tPlaying the LED_USER_COMING sequence...");
+        play_led_sequence(LED_USER_COMING);
+      }
+    }else{                   //We didn't receive an MQTT response in time
+      Serial.println("The wait for an MQTT response timed out!");
+      Serial.println("\tPlaying the LED_USER_TIMEOUT sequence...");
+      play_led_sequence(LED_USER_TIMEOUT);
+    }
 
     // IMPORTANT: Deep-sleep will wake up by rebooting the ESP8266.
     //            For it to work, the pins 16 and RST need to be shorted
-    // This call never returns
+    //            BUT in this case we don't want the device to ever wake up.
+    //            We use deepSleep as a way of keeping low power consumption
+    //            until the Button connecting RST and GND gets pressed. Only
+    //            then we'll wake up the ESP and publish a 'button pressed' msg
+    // This call should never return:
     ESP.deepSleep(5000000, WAKE_RFCAL); //time is in micro seconds
-    //@TODO: Figure out why we need this endless loop:
+    //@TODO: depSleep() is returning the 1st time it's called. Figure out why.
+    //       In the meantime:
     while(1) delay(1000); //stop the program from re-entering loop()
   }else{ //If we're in AP mode or simply not connected
     server.handleClient();
   }
-}
-
-#define SLOW_BLINK_DELAY 300
-#define FAST_BLINK_DELAY 100
-
-inline void led_seq_for(uint32_t loops, uint32_t delay_len)
-{
-  for(int i=0; i<loops; i++)
-  {
-    delay(delay_len);
-    digitalWrite(LED_PIN, HIGH);
-    delay(delay_len);
-    digitalWrite(LED_PIN, LOW);
-  }
-}
-
-//@TODO: Make sure this ifdef works fine. Explain how to use it in a comment.
-#define LED_DEBUGGING_ENABLED
-void play_led_sequence(uint16_t status)
-{
-  #ifdef LED_DEBUGGING_ENABLED
-  switch(status)
-  {
-    case ERR_OK:                     led_seq_for(2,  FAST_BLINK_DELAY); break;
-    case ERR_WIFI_CONNECT_FAILED:    led_seq_for(5,  SLOW_BLINK_DELAY); break;
-    case ERR_MQTT_CONNECTION_FAILED: led_seq_for(10, SLOW_BLINK_DELAY); break;
-    case ERR_MQTT_PUBLISH_FAILED:    led_seq_for(2,  SLOW_BLINK_DELAY); break;
-    case ERR_MQTT_UNEXPECTED_DISC:   led_seq_for(10, SLOW_BLINK_DELAY); break;
-    case ERR_SERVER_ISSUE:           led_seq_for(7,  SLOW_BLINK_DELAY); break;
-  }
-  #endif
 }
 
 void setupAccessPoint()
@@ -189,7 +249,7 @@ void setupAccessPoint()
 bool tryWifiConnect()
 {
   WiFi.begin(ssid, pass);
-  char err_cause[100] = "";
+  char err_cause[DEFAULT_BUFFER_SIZE] = "";
   switch(WiFi.waitForConnectResult())
   {
     case WL_CONNECTED:
@@ -228,8 +288,7 @@ byte ascii_char_to_byte(char c)
     case 'E': return 0x0E;
     case 'F': return 0x0F;
     default:
-      c &= 0x0F;
-      return c;
+      return (c & 0x0F);
   }
 }
 
@@ -247,7 +306,7 @@ bool decode_url_string(char *dst, char *src)
     }
     else
     {
-      dst[dst_idx] += src[i];
+      dst[dst_idx] = src[i];
     }
     dst_idx++;
   }
@@ -259,38 +318,38 @@ bool decode_url_string(char *dst, char *src)
 //@TODO: Rename the function to use a more descriptive name
 void handleRoot()
 {
-  if(server.args() > 0)
+  if(server.args() > 0) //The user sent the credentials via HTTP
   {
-    for(int x = 0; x < server.args(); x++)
+    /*
+    for(int x = 0; x < server.args(); x++) //Print all received args (encoded)
     {
       Serial.print(server.argName(x));
       Serial.print(":");
       Serial.println(server.arg(x));
     }
-    server.arg(0).toCharArray(ssid, 100);
-    String pwd = server.arg(1);
-    pwd.toCharArray(pass, 100);
-    decode_url_string(ssid, pass);
-    Serial.print("new pwd: ");
+    */
+    static char received_ssid[DEFAULT_BUFFER_SIZE] = ""; //For the encoded ssid
+    static char received_pass[DEFAULT_BUFFER_SIZE] = ""; //For the encoded pass
+    server.arg(0).toCharArray(received_ssid, DEFAULT_BUFFER_SIZE);
+    server.arg(1).toCharArray(received_pass, DEFAULT_BUFFER_SIZE);
+    decode_url_string(ssid, received_ssid);
+    decode_url_string(pass, received_pass);
+    Serial.print("\tNew ssid: ");
+    Serial.println(ssid);
+    Serial.print("\tNew pass: ");
     Serial.println(pass);
     EEPROM.put(WIFI_SSID_ADDR, ssid);
     EEPROM.put(WIFI_PASS_ADDR, pass);
     Serial.println("Commiting ssid and pass to EEPROM");
     EEPROM.commit();
 
-    Serial.println("checking status");
+    Serial.println("Attempting to stablish WiFi connection...");
     WiFi.disconnect(); // Disconnect the AP before trying to connect as a client
     if(tryWifiConnect())
     {
       //@TODO?: Include the reason why the connection failed in the HTTP resp
       //        tryWifiConnect() will have to be modified to return the reason.
-      server.send(200, "text/html", "couldn't connect");
-      Serial.println("couln't connect");
-    }else{
-      // NOTE: cannot return a page that says I've connected because
-      //       the access point isn't live when connected as a client
-      //server.send(200, "text/html", "connected!@#$%");=
-      Serial.println("connected!!");
+      server.send(200, "text/html", "Couldn't connect to the WiFi network");
     }
   }else{
     // TODO: push down JS to refresh the page 15 seconds after post
