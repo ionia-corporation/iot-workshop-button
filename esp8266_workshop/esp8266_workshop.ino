@@ -174,30 +174,38 @@ void loop()
       play_led_sequence(ERR_OK, true);
     }
 
+    Serial.println("Waiting for the user to respond to the message...");
     //Wait for a message in the respTopic MQTT topic. If we haven't received one
     //after ${RESPONSE_WAITING_TIME} ms, time out.
     static char mqtt_response[DEFAULT_BUFFER_SIZE] = "";
     static bool got_response = false;
     Adafruit_MQTT_Subscribe *subscription;
-    while ((subscription = mqtt.readSubscription(RESPONSE_WAITING_TIME))) //@TODO: This timeout does not seem to wrk (function returns right away even when there are no messages sent to the response topic
+
+    for(uint16_t i=0; i<60; i+=1)
     {
-      if (subscription == &respTopic)
+      while ((subscription = mqtt.readSubscription(1000)))
       {
-        strncpy(mqtt_response, (char *)respTopic.lastread, DEFAULT_BUFFER_SIZE);
-        got_response = true;
+        if (subscription == &respTopic)
+        {
+          strncpy(mqtt_response, (char *)respTopic.lastread, DEFAULT_BUFFER_SIZE);
+          got_response = true;
+          Serial.print("Received a message in the response tocpic: ");
+          Serial.println(mqtt_response);
+        }
       }
+      if(got_response == true) break;
     }
 
     if(got_response == true) //Got a response via MQTT!
     {
       Serial.print(F("Received MQTT message: "));
       Serial.println(mqtt_response);
-      if(strncmp(mqtt_response, "user_away", DEFAULT_BUFFER_SIZE))
+      if(!strncmp(mqtt_response, "user_away", DEFAULT_BUFFER_SIZE))
       {
         Serial.println("\tPlaying the LED_USER_AWAY sequence...");
         play_led_sequence(LED_USER_AWAY);
       }
-      else if(strncmp(mqtt_response, "user_coming", DEFAULT_BUFFER_SIZE))
+      else if(!strncmp(mqtt_response, "user_coming", DEFAULT_BUFFER_SIZE))
       {
         Serial.println("\tPlaying the LED_USER_COMING sequence...");
         play_led_sequence(LED_USER_COMING);
