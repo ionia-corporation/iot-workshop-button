@@ -15,6 +15,7 @@ extern "C" {
 
 /*************************** GPIO Setup **************************************/
 #define LED_PIN    13
+//The button for the demo needs to be connected between the RST pin and GND
 
 /*************************** Workflow Variables *******************************/
 #define RESPONSE_WAITING_TIME 60000 //Wait for an MQTT response for up to 1min
@@ -33,9 +34,9 @@ enum {
 };
 
 enum {
-    LED_USER_COMING  = 0,
-    LED_USER_AWAY    = 1,
-    LED_USER_TIMEOUT = 2
+  LED_USER_COMING  = 0,
+  LED_USER_AWAY    = 1,
+  LED_USER_TIMEOUT = 2
 };
 
 /*************************** Wifi Setup **************************************/
@@ -43,17 +44,16 @@ enum {
 const char *ap_ssid = "InigoMontoya";
 const char *ap_pass = "IocaneRules"; //Min. 8 characters
 ESP8266WebServer server(80);
-// Client
-char ssid[DEFAULT_BUFFER_SIZE];
-char pass[DEFAULT_BUFFER_SIZE];
 #define WIFI_SSID_ADDR    0
 #define WIFI_PASS_ADDR    100
 
-/*************************** MQTT Server *************************************/
+/*************************** MQTT Setup **************************************/
 #define MQTT_SERVER_ADDR  "m11.cloudmqtt.com"
-#define MQTT_SERVERPORT   15848
-#define MQTT_USERNAME_S   "jehezims"
-#define MQTT_KEY          "Z1YgWLhMin_c"
+#define MQTT_SERVERPORT   12476
+#define MQTT_USERNAME_S   "ard"
+#define MQTT_KEY          "uino"
+#define MQTT_OUT_TOPIC    "button"
+#define MQTT_IN_TOPIC     "response"
 
 /************************** Global State ************************************/
 // Create an ESP8266 WiFiClient class to connect to the MQTT server.
@@ -69,17 +69,15 @@ const char MQTT_PASSWORD[] PROGMEM  = MQTT_KEY;
 // Setup the MQTT client class by passing in the WiFi client and MQTT server and login details.
 Adafruit_MQTT_Client mqtt(&client, MQTT_SERVER, MQTT_SERVERPORT, MQTT_CLIENTID, MQTT_USERNAME, MQTT_PASSWORD);
 
-/****************************** Topics ***************************************/
-
 //This is the topic we'll publish to when the device boots up. Pressing the
 //connected between RST and GND causes a reboot
-const char BUTTON_TOPIC[] PROGMEM = "/testing";
+const char BUTTON_TOPIC[] PROGMEM = MQTT_OUT_TOPIC;
 Adafruit_MQTT_Publish buttonTopic = Adafruit_MQTT_Publish(&mqtt, BUTTON_TOPIC);
 
 //This is the topic we subscribe to in order to receive the user's response
 //after the RST button is pressed. We wait for incoming messages for 1 minute
 //after boot:
-const char RESPONSE_TOPIC[] PROGMEM = "/resp";
+const char RESPONSE_TOPIC[] PROGMEM = MQTT_IN_TOPIC;
 Adafruit_MQTT_Subscribe respTopic = Adafruit_MQTT_Subscribe(&mqtt, RESPONSE_TOPIC);
 
 /***************************** Program **************************************/
@@ -137,7 +135,9 @@ void setup()
   Serial.print(WiFi.macAddress());
   Serial.println("]");
 
-  //If the user has already set up their WiFi creds before they'll be in EEPROM
+  //If the user has already set up their WiFi creds before, they'll be in EEPROM
+  char ssid[DEFAULT_BUFFER_SIZE] = "";
+  char pass[DEFAULT_BUFFER_SIZE] = "";
   bool gotValidCredentials = 0;
   EEPROM.get(WIFI_SSID_ADDR, ssid);
   EEPROM.get(WIFI_PASS_ADDR, pass);
@@ -148,7 +148,7 @@ void setup()
   {
     Serial.println("Trying to use the stored WiFi credentials:");
     Serial.println(String("\tSSID: [") + ssid + "]\n\tpass: [" + pass + "]");
-    if(!tryWifiConnect())
+    if(!tryWifiConnect(ssid, pass))
     {
       play_led_sequence(ERR_WIFI_CONNECT_FAILED, true);
       setupAccessPoint();
@@ -181,7 +181,7 @@ void loop()
     static bool got_response = false;
     Adafruit_MQTT_Subscribe *subscription;
 
-    for(uint16_t i=0; i<60; i+=1)
+    for(uint16_t i=0; i<RESPONSE_WAITING_TIME; i+=1000)
     {
       while ((subscription = mqtt.readSubscription(1000)))
       {
@@ -252,15 +252,16 @@ void setupAccessPoint()
      * return: true if the connection was successful. false otherwise.
      */
 //@TODO: This function should get passed ssid/pass instead of using globals
-bool tryWifiConnect()
+//bool tryWifiConnect()
+bool tryWifiConnect(char *ssid, char *password)
 {
-  WiFi.begin(ssid, pass);
+  WiFi.begin(ssid, password);
   char err_cause[DEFAULT_BUFFER_SIZE] = "";
   switch(WiFi.waitForConnectResult())
   {
     case WL_CONNECTED:
       Serial.println("Success! Connection to the AP stablished");
-      break;
+      return true;
     case WL_DISCONNECTED:
       Serial.println("Connection to AP failed. Is the mode set to STA?");
       break;
@@ -279,7 +280,7 @@ bool tryWifiConnect()
          WL_DISCONNECTED     = 6
       */
   }
-  return (WiFi.status() == WL_CONNECTED);
+  return false;
 }
 
 byte ascii_char_to_byte(char c)
@@ -355,22 +356,24 @@ void handle_http_root()
     */
     static char received_ssid[DEFAULT_BUFFER_SIZE] = ""; //For the encoded ssid
     static char received_pass[DEFAULT_BUFFER_SIZE] = ""; //For the encoded pass
+    static char decoded_ssid[DEFAULT_BUFFER_SIZE] = "";  //For the decoded ssid
+    static char decoded_pass[DEFAULT_BUFFER_SIZE] = "";  //For the decoded pass
     server.arg(0).toCharArray(received_ssid, DEFAULT_BUFFER_SIZE);
     server.arg(1).toCharArray(received_pass, DEFAULT_BUFFER_SIZE);
-    decode_url_string(ssid, received_ssid);
-    decode_url_string(pass, received_pass);
+    decode_url_string(decoded_ssid, received_ssid);
+    decode_url_string(decoded_pass, received_pass);
     Serial.print("\tNew ssid: ");
-    Serial.println(ssid);
+    Serial.println(decoded_ssid);
     Serial.print("\tNew pass: ");
-    Serial.println(pass);
-    EEPROM.put(WIFI_SSID_ADDR, ssid);
-    EEPROM.put(WIFI_PASS_ADDR, pass);
+    Serial.println(decoded_pass);
+    EEPROM.put(WIFI_SSID_ADDR, decoded_ssid);
+    EEPROM.put(WIFI_PASS_ADDR, decoded_pass);
     Serial.println("Commiting ssid and pass to EEPROM");
     EEPROM.commit();
 
     Serial.println("Attempting to stablish WiFi connection...");
     WiFi.disconnect(); // Disconnect the AP before trying to connect as a client
-    if(tryWifiConnect())
+    if(!tryWifiConnect(decoded_ssid, decoded_pass))
     {
       //@TODO?: Include the reason why the connection failed in the HTTP resp
       //        tryWifiConnect() will have to be modified to return the reason.
