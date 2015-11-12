@@ -11,10 +11,15 @@ There are 3 items required to upload this program to an ESP8266:
 - Adafruit MQTT Library -- This allows the device to communicate with the server
   using the MQTT protocol.
 
-### Installing the IDE and Board Manager
+### Using the Arduino IDE for the ESP8266
 
 You can find very detailed instructions on how to install these 2 components here:
 https://learn.adafruit.com/adafruit-huzzah-esp8266-breakout/using-arduino-ide
+
+WARNING: Do not download the latest version of the Arduino IDE (1.6.6). There's
+an issue with it. Instead, select the version 1.6.5 when downloading.
+
+More info about the issue with 1.6.6 here: https://github.com/esp8266/Arduino/issues/965
 
 ### Adafruit MQTT library
 
@@ -25,6 +30,8 @@ For more information and examples regarding this library, check out
 [its GitHub repository](https://github.com/adafruit/Adafruit_MQTT_Library)
 
 Note: This project has been tested using the version 0.10.0
+
+--------------------------------------------------------------------------------
 
 Building the hardware
 =====================
@@ -66,16 +73,27 @@ breadboard and get those components soldered. If it's still working, solder the
 MicroLipo and battery and feel free to remove the FTDI board and the connection
 to your computer.
 
+--------------------------------------------------------------------------------
+
 Running the demo
 ================
 
 ### Uploading the code to the ESP8266
 
+Assuming you already set up the Arduino IDE and its dependencies, you only need to:
+
+1. Connect your device to your computer via USB (USB->FTDI->Huzzah)
+2. Press the button labeled "GPIO0" in the Huzzah, and without letting go of it
+   press the one labeled "Reset". Then let lo of both of them.
+3. Click the button called "Upload" in the Arduino IDE.
+
 ### Reading the ESP's serial output
+
+--------------------------------------------------------------------------------
 
 Understanding the code
 ======================
 
 ### Workflow
 
-
+![workflow diagram](https://i.imgur.com/o1GcZ1Z.png)
