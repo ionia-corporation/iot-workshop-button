@@ -11,10 +11,30 @@ extern "C" {
   #include "user_interface.h"
 }
 
+/*************************** MQTT Setup **************************************/
+#define MQTT_SERVER_ADDR  "m11.cloudmqtt.com"
+#define MQTT_SERVERPORT   12476
+#define MQTT_USERNAME_S   "ard"
+#define MQTT_KEY          "uino"
+#define MQTT_OUT_TOPIC    "button"
+#define MQTT_IN_TOPIC     "response"
+
+/*************************** Wifi Setup **************************************/
+// Acces Point -- The ap_ssid_prefix will be prepended to the Device ID
+const char *ap_ssid_prefix = "ESP8266_";
+const char *ap_pass = "knockknock"; //Min. 8 characters
+ESP8266WebServer server(80);
+#define WIFI_SSID_ADDR    0
+#define WIFI_PASS_ADDR    100
+
+/*************************** PROG SETINGS *************************************/
 #define DEFAULT_BUFFER_SIZE 100 //Buffer size to use for creds, messages, etc.
+//Remember to update the EEPROM addresses for the client SSID and password if
+//you ever increase the size of DEFAULT_BUFFER_SIZE over 100. These addresses
+//can be found in the definitions of WIFI_SSID_ADDR and WIFI_PASS_ADDR.
 
 /*************************** GPIO Setup **************************************/
-#define LED_PIN    13
+#define LED_PIN    5 //The LED in the button is to be connected to this pin
 //The button for the demo needs to be connected between the RST pin and GND
 
 /*************************** Workflow Variables *******************************/
@@ -38,22 +58,6 @@ enum {
   LED_USER_AWAY    = 1,
   LED_USER_TIMEOUT = 2
 };
-
-/*************************** Wifi Setup **************************************/
-// Acces Point
-const char *ap_ssid = "InigoMontoya";
-const char *ap_pass = "IocaneRules"; //Min. 8 characters
-ESP8266WebServer server(80);
-#define WIFI_SSID_ADDR    0
-#define WIFI_PASS_ADDR    100
-
-/*************************** MQTT Setup **************************************/
-#define MQTT_SERVER_ADDR  "m11.cloudmqtt.com"
-#define MQTT_SERVERPORT   12476
-#define MQTT_USERNAME_S   "ard"
-#define MQTT_KEY          "uino"
-#define MQTT_OUT_TOPIC    "button"
-#define MQTT_IN_TOPIC     "response"
 
 /************************** Global State ************************************/
 // Create an ESP8266 WiFiClient class to connect to the MQTT server.
@@ -79,6 +83,8 @@ Adafruit_MQTT_Publish buttonTopic = Adafruit_MQTT_Publish(&mqtt, BUTTON_TOPIC);
 //after boot:
 const char RESPONSE_TOPIC[] PROGMEM = MQTT_IN_TOPIC;
 Adafruit_MQTT_Subscribe respTopic = Adafruit_MQTT_Subscribe(&mqtt, RESPONSE_TOPIC);
+
+#define BUTTON_PRESSED_MQTT_PAYLOAD "The button has been pressed!"
 
 /***************************** Program **************************************/
 inline void led_seq_for(uint32_t loops, uint32_t delay_len)
@@ -165,7 +171,7 @@ void loop()
   {
     mqtt.subscribe(&respTopic); //Subscribe to the response topic
     MQTT_connect();
-    if(!buttonTopic.publish("Our pub payload!"))
+    if(!buttonTopic.publish(BUTTON_PRESSED_MQTT_PAYLOAD))
     {
       Serial.println("PUBLISH FAILED");
       play_led_sequence(ERR_MQTT_PUBLISH_FAILED, true);
@@ -236,12 +242,19 @@ void setupAccessPoint()
 {
   Serial.println();
   Serial.print("\nConfiguring access point...");
-  //@TODO: Generate a random number 1-13 to use as the WiFi channel in AP mode.
-  /* You can pass 0 as the password parameter if you want the AP to be open. */
-  WiFi.softAP(ap_ssid, ap_pass, 1); //3rd argument is the WiFi channel (1-13)
+  randomSeed(analogRead(A0));
+  int wifi_channel = random(1,14); //The channel to use as an AP. Range: [1, 13]
+
+  char ap_ssid[DEFAULT_BUFFER_SIZE] = "";
+  uint32_t chip_id = ESP.getChipId();
+  sprintf(ap_ssid, "%s%d", ap_ssid_prefix, &chip_id);
+
+  Serial.print(String("\n\tAP SSID:     ") + ap_ssid);
+  Serial.print(String("\n\tAP Password: ") + ap_pass);
+  WiFi.softAP(ap_ssid, ap_pass, wifi_channel);
 
   IPAddress myIP = WiFi.softAPIP();
-  Serial.print("AP IP address: ");
+  Serial.print("\n\tAP IP address: ");
   Serial.println(myIP);
   server.on("/", handle_http_root);
   server.begin();
@@ -251,8 +264,6 @@ void setupAccessPoint()
 /* Connect to a network.
      * return: true if the connection was successful. false otherwise.
      */
-//@TODO: This function should get passed ssid/pass instead of using globals
-//bool tryWifiConnect()
 bool tryWifiConnect(char *ssid, char *password)
 {
   WiFi.begin(ssid, password);
