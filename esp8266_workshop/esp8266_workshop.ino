@@ -20,7 +20,7 @@ extern "C" {
 #define MQTT_IN_TOPIC     "response"
 
 /*************************** Wifi Setup **************************************/
-// Acces Point -- The ap_ssid_prefix will be prepended to the Device ID
+// Acces Point -- The ap_ssid_prefix will be prepended to part of the MAC addr
 const char *ap_ssid_prefix = "ESP8266_";
 const char *ap_pass = "knockknock"; //Min. 8 characters
 ESP8266WebServer server(80);
@@ -246,9 +246,11 @@ void setupAccessPoint()
   int wifi_channel = random(1,14); //The channel to use as an AP. Range: [1, 13]
 
   char ap_ssid[DEFAULT_BUFFER_SIZE] = "";
-  uint32_t chip_id = ESP.getChipId();
-  sprintf(ap_ssid, "%s%d", ap_ssid_prefix, &chip_id);
+  String esp_mac = WiFi.macAddress();
+  esp_mac.remove(0, 9);     // Remove the first 3 octets of the mac
+  esp_mac.replace(":", ""); // Remove colons for the ap_ssid
 
+  sprintf(ap_ssid, "%s%s", ap_ssid_prefix, esp_mac.c_str());
   Serial.print(String("\n\tAP SSID:     ") + ap_ssid);
   Serial.print(String("\n\tAP Password: ") + ap_pass);
   WiFi.softAP(ap_ssid, ap_pass, wifi_channel);
@@ -259,6 +261,11 @@ void setupAccessPoint()
   server.on("/", handle_http_root);
   server.begin();
   Serial.println("HTTP server started");
+  Serial.println("Next steps:");
+  Serial.println("\t1. Connect to your device's WiFi network");
+  Serial.print(  "\t2. Open your browser and go to the address ");
+  Serial.println(myIP);
+  Serial.println("\t3. Introduce the credentials of your home WiFi");
 }
 
 /* Connect to a network.
