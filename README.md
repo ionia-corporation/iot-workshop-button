@@ -89,6 +89,11 @@ Assuming you already set up the Arduino IDE and its dependencies, you only need 
 
 ### Reading the ESP's serial output
 
+Once the code has been burnt into the device, we can open the "Serial Terminal"
+in the Arduino IDE. This terminal allows us to communicate with the device in real
+time so we can know what exactly is going on and figure out if anything isn't working
+properly.
+
 --------------------------------------------------------------------------------
 
 Understanding the code
