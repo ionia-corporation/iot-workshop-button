@@ -380,6 +380,7 @@ void handle_http_root()
     server.arg(1).toCharArray(received_pass, DEFAULT_BUFFER_SIZE);
     decode_url_string(decoded_ssid, received_ssid);
     decode_url_string(decoded_pass, received_pass);
+    Serial.println("\nReceived new WiFi credentials:");
     Serial.print("\tNew ssid: ");
     Serial.println(decoded_ssid);
     Serial.print("\tNew pass: ");
